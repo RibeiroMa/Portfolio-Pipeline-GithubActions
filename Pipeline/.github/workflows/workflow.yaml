@@ -1,0 +1,78 @@
+name: Deploy to Amazon ECR
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+  
+      
+jobs:
+  deploy:
+    name: Deploy
+    runs-on: ubuntu-latest
+    environment: production
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v2
+        with:
+          node-version: 20
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@0e613a0980cbf65ed5b322eb7a1e075d28913a83
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@62f4f872db3836360b72999f4b87f1ff13310f3a
+
+      - name: Set tag based on branch
+        id: set-tag
+        run: |
+          if [[ "$GITHUB_REF" == "refs/heads/main" ]]; then
+              TAG="latest"
+          elif [[ "$GITHUB_REF" == "refs/heads/develop" ]]; then
+              TAG="develop"
+          else
+              echo "Branch not recognized, skipping Docker push."
+              exit 1
+          fi
+          echo "TAG=$TAG" >> $GITHUB_ENV
+         # echo "ECR_REGISTRY=${{ steps.login-ecr.outputs.registry }}" >> $GITHUB_ENV
+
+      - name: Build image and tag
+        id: build-image
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+        run: |
+          docker build -t hello .
+          docker tag hello $ECR_REGISTRY/${{ secrets.ECR_REPOSITORY }}:$TAG
+        
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@0.20.0
+        with:
+            image-ref: 'hello'
+            format: 'sarif'
+            output: 'trivy-results.sarif'    
+
+      - name: Tag and push image to Amazon ECR
+        id: push-image
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+        run: |
+          docker push $ECR_REGISTRY/${{ secrets.ECR_REPOSITORY }}:$TAG
+
+
+
+
+          
